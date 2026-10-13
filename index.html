@@ -166,9 +166,14 @@
         <h3>播放音频</h3>
         
         <!-- AI 音频 -->
-        <div style="margin:1rem 0;padding:1rem;border:1px solid #ddd;border-radius:8px;">
-          <strong>AI 朗读</strong>
-          <p style="color:#666;font-size:0.9rem;margin:0.5rem 0 0 0;">使用浏览器自带的 AI 语音朗读文章</p>
+        <div style="margin:1rem 0;padding:1rem;border:1px solid #ddd;border-radius:8px;cursor:pointer;" @click="playAI() {
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <strong>AI 朗读</strong>
+              <p style="color:#666;font-size:0.9rem;margin:0.5rem 0 0 0;">使用浏览器自带的语音朗读文章</p>
+            </div>
+            <button style="padding:6px 16px;cursor:pointer;">播放</button>
+          </div>
         </div>
         
         <!-- 用户上传的音频 -->
@@ -1322,6 +1327,25 @@
           };
         };
       },
+      // AI 朗读
+      playAI(){
+        // 提取文章纯文本
+        const div = document.createElement("div");
+        div.innerHTML = this.articleHtml;
+        const text = div.textContent || div.innerText || "";
+        
+        // 使用浏览器 TTS
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'en-US';
+          utterance.rate = 1.0;
+          window.speechSynthesis.speak(utterance);
+          alert("开始 AI 朗读，再点一次停止");
+        } else {
+          alert("你的浏览器不支持语音朗读");
+        }
+      },
       // 播放音频
       playAudio(audio){
         const audioEl = new Audio(audio.audioData);
@@ -1329,6 +1353,8 @@
       },
       // 开始录音
       async startRecording(){
+        const ready = confirm("准备好开始录音了吗？\n\n建议先把文章打印出来，然后点确定开始录音。");
+        if (!ready) return;
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           this.mediaRecorder = new MediaRecorder(stream);
@@ -1344,12 +1370,20 @@
             reader.onload = (e) => {
               const audioData = e.target.result;
               const articleId = this.currentArticle.fileKey;
-              const uploaderName = this.uploaderName || "匿名";
+              
+              // 先让用户填名字
+              const uploaderName = prompt("请输入录音者名字：", this.uploaderName || "");
+              if (!uploaderName) {
+                alert("已取消，录音未保存");
+                return;
+              }
+              localStorage.setItem("uploaderName", uploaderName);
+              this.uploaderName = uploaderName;
               
               // 保存到 IndexedDB
               this.saveAudioToDB(articleId, uploaderName, audioData, "录音_" + new Date().toLocaleTimeString() + ".webm");
               
-              alert("录音完成，已保存！");
+              alert("录音完成，已保存！\n可以点🎵按钮查看和播放。");
             };
             reader.readAsDataURL(blob);
             
