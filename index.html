@@ -199,22 +199,37 @@
     </div>
 
     <!-- 上传音频弹窗 -->
-    <div v-if="showUploadModal" class="modal" @click.self="showUploadModal=false">
+    <div v-if="showUploadModal" class="modal" @click.self="!isUploading && closeUploadModal()">
       <div class="modal-card">
-        <span class="close-btn" @click="showUploadModal=false">✕</span>
+        <span class="close-btn" @click="closeUploadModal()" :style="{opacity: isUploading ? 0.3 : 1, pointerEvents: isUploading ? 'none' : 'auto'}">✕</span>
         <h3>上传音频</h3>
-        <div style="margin:1rem 0;">
-          <label>上传者名字：</label>
-          <input v-model="uploaderName" placeholder="输入你的名字" style="padding:6px;margin-left:8px;">
+
+        <!-- 上传结果提示 -->
+        <div v-if="uploadResult === 'success'" style="margin:1rem 0;padding:1rem;background:#e8f5e9;border-radius:8px;color:#2e7d32;">
+          ✅ 上传成功！
+          <button @click="closeUploadModal()" style="margin-left:1rem;padding:6px 16px;cursor:pointer;background:#2e7d32;color:white;border:none;border-radius:6px;">关闭</button>
         </div>
-        <div style="margin:1rem 0;">
-          <label>选择音频文件：</label>
-          <input ref="audioFile" type="file" accept="audio/*" style="margin-left:8px;">
+        <div v-else-if="uploadResult && uploadResult.startsWith('error:')" style="margin:1rem 0;padding:1rem;background:#ffebee;border-radius:8px;color:#c62828;">
+          ❌ {{ uploadResult.substring(6) }}
+          <button @click="uploadResult=null" style="margin-left:1rem;padding:6px 16px;cursor:pointer;background:#c62828;color:white;border:none;border-radius:6px;">知道了</button>
         </div>
-        <div style="display:flex;gap:8px;margin-top:1rem;">
-          <button @click="uploadAudio()" style="padding:8px 16px;cursor:pointer;flex:1;">上传</button>
-          <button @click="showUploadModal=false" style="padding:8px 16px;cursor:pointer;flex:1;background:#f5f5f5;">取消</button>
-        </div>
+
+        <template v-if="uploadResult !== 'success'">
+          <div style="margin:1rem 0;">
+            <label>上传者名字：</label>
+            <input v-model="uploaderName" placeholder="输入你的名字" style="padding:6px;margin-left:8px;" :disabled="isUploading">
+          </div>
+          <div style="margin:1rem 0;">
+            <label>选择音频文件：</label>
+            <input ref="audioFile" type="file" accept="audio/*" style="margin-left:8px;" :disabled="isUploading">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:1rem;">
+            <button @click="uploadAudio()" :disabled="isUploading" :style="{opacity: isUploading ? 0.5 : 1, cursor: isUploading ? 'not-allowed' : 'pointer'}" style="padding:8px 16px;flex:1;">
+              {{ isUploading ? '上传中…' : '上传' }}
+            </button>
+            <button @click="closeUploadModal()" :disabled="isUploading" :style="{opacity: isUploading ? 0.3 : 1, pointerEvents: isUploading ? 'none' : 'auto'}" style="padding:8px 16px;flex:1;background:#f5f5f5;">取消</button>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -1142,6 +1157,8 @@
           vocabList: [],
           articleHtml: "",
         showUploadModal: false,
+        uploadResult: null,       // null | 'success' | 'error'
+        isUploading: false,
         showAudioPlayer: false,
         isRecording: false,
         mediaRecorder: null,
@@ -1166,6 +1183,21 @@
           this.calYear = parseInt(y)
           this.calMonth = parseInt(m) - 1
         }
+        // ESC 键关闭弹窗
+        this.escHandler = (e) => {
+          if (e.key !== 'Escape') return
+          if (this.showUploadModal) {
+            if (!this.isUploading) this.closeUploadModal()
+          } else if (this.showAudioPlayer) {
+            this.showAudioPlayer = false
+          } else if (this.showArticle) {
+            this.closeArticle()
+          }
+        }
+        document.addEventListener('keydown', this.escHandler)
+      },
+      beforeUnmount(){
+        if (this.escHandler) document.removeEventListener('keydown', this.escHandler)
       },
       computed:{
         calCells(){
@@ -1286,31 +1318,46 @@
             }
           })
         },
-        // 上传音频
+        // 关闭上传弹窗（重置状态）
+      closeUploadModal(){
+        if (this.isUploading) return  // 上传中禁止关闭
+        this.showUploadModal = false
+        this.uploadResult = null
+        if (this.$refs.audioFile) this.$refs.audioFile.value = ''
+      },
+      // 上传音频
       async uploadAudio(){
         const file = this.$refs.audioFile.files[0];
         if (!file) {
-          alert("请选择音频文件");
+          this.uploadResult = 'error:请先选择音频文件'
           return;
         }
         if (!this.uploaderName.trim()) {
-          alert("请输入上传者名字");
+          this.uploadResult = 'error:请输入上传者名字'
           return;
         }
         localStorage.setItem("uploaderName", this.uploaderName);
-        
+        this.isUploading = true;
+        this.uploadResult = null;
+
         // 读取文件并保存到 IndexedDB
         const reader = new FileReader();
         reader.onload = (e) => {
-          const audioData = e.target.result;
-          const articleId = this.currentArticle.fileKey;
-          
-          // 保存到 IndexedDB
-          this.saveAudioToDB(articleId, this.uploaderName, audioData, file.name);
-          
-          alert("上传成功！");
-          this.showUploadModal = false;
-          this.loadUploadedAudios(articleId);
+          try {
+            const audioData = e.target.result;
+            const articleId = this.currentArticle.fileKey;
+            this.saveAudioToDB(articleId, this.uploaderName, audioData, file.name);
+            this.isUploading = false;
+            this.uploadResult = 'success';
+            this.loadUploadedAudios(articleId);
+          } catch (err) {
+            this.isUploading = false;
+            this.uploadResult = 'error:保存失败，请重试';
+          }
+        };
+        reader.onerror = () => {
+          this.isUploading = false;
+          this.uploadResult = 'error:文件读取失败';
         };
         reader.readAsDataURL(file);
       },
