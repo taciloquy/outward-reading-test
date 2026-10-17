@@ -54,6 +54,14 @@
     .article-content h1{font-size:18px !important;margin-bottom:6px !important;}
     .article-content .subtitle{font-size:12px !important;color:#555 !important;margin-bottom:12px !important;}
     .article-content .header-bar{font-size:11px !important;}
+    /* 【改动】翻译版视图：字体与原文(clean)一致，覆盖源 HTML 自带的 12pt 小字号 */
+    .translated-view{font-size:1.05rem !important;line-height:1.75 !important;font-family:system-ui,-apple-system,sans-serif !important;}
+    .translated-view h1{font-size:1.2rem !important;line-height:1.4 !important;margin:0 0 4px 0 !important;color:#222 !important;}
+    .translated-view h1.cn{font-size:0.95rem !important;color:#666 !important;font-weight:normal !important;margin:0 0 14px 0 !important;}
+    .translated-view div.g{margin:0 0 14px 0 !important;}
+    .translated-view p{font-size:1.05rem !important;line-height:1.75 !important;margin:0 0 4px 0 !important;color:#222 !important;font-family:system-ui,-apple-system,sans-serif !important;}
+    .translated-view p.cn{font-size:0.95rem !important;line-height:1.7 !important;color:#555 !important;margin:0 0 10px 0 !important;}
+    .translated-view *{letter-spacing:normal !important;}
     .btn-group button{margin-right:8px;padding:8px 14px;cursor:pointer;border-radius:6px;border:1px solid #aaa;background:#fff;font-size:0.9rem;}
     .btn-group button.primary{background:#2563eb;color:#fff;border-color:#2563eb;}
     .modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:10;display:flex;align-items:center;justify-content:center;}
@@ -131,8 +139,8 @@
         <div class="btn-group">
           <button :class="{primary:mode==='clean'}" @click="mode='clean';loadContent()">原文</button>
           <button :class="{primary:mode==='annotated'}" @click="mode='annotated';loadContent()">批注版</button>
-          <!-- 新增：翻译版按钮，新标签页打开同目录 translated.html -->
-          <button @click="openTranslated()" title="翻译版">翻译版</button>
+          <!-- 【改动】翻译版改为内嵌切换视图，不再新标签页打开 -->
+          <button :class="{primary:mode==='translated'}" @click="mode='translated';loadContent()">翻译</button>
           <!-- <button @click="showVocab=true">生词表</button> -->
           <button @click="printArticle()" title="打印" style="padding:8px 12px;">🖨</button>
           <button @click="downloadArticle()" title="下载" style="padding:8px 12px;">⬇</button>
@@ -150,6 +158,13 @@
               <p style="margin:4px 0;color:#666;">{{ dictResult.phonetic }}</p>
               <p style="margin:4px 0;">{{ dictResult.definition }}</p>
             </div>
+          </div>
+        </div>
+        <!-- 【改动】翻译版视图：上下分屏布局保留，但点击中文不触发查词 -->
+        <div v-else-if="mode === 'translated'" class="split-view">
+          <div class="article-reading translated-view" v-html="articleHtml"></div>
+          <div class="dict-panel">
+            <div class="dict-placeholder">【翻译视图下点击中文不触发查词，切回原文可点词】</div>
           </div>
         </div>
         <!-- 批注页：保持原来的单栏布局 -->
@@ -1179,20 +1194,27 @@
           this.loadContent()
         },
         loadContent(){
-          const url = this.mode === "clean"
-            ? this.currentArticle.cleanPath
-            : this.currentArticle.annotatedPath
+          // 【改动】支持 translated 模式：URL = cleanPath 替换后缀
+          let url;
+          if (this.mode === "clean") url = this.currentArticle.cleanPath;
+          else if (this.mode === "annotated") url = this.currentArticle.annotatedPath;
+          else if (this.mode === "translated") url = this.currentArticle.cleanPath.replace('.clean.html', '.translated.html');
           const cacheKey = 'article_' + this.currentArticle.fileKey + '_' + this.mode;
-          
+
           // 先从缓存读取（快速显示）
           const cached = localStorage.getItem(cacheKey);
           if (cached) {
             this.articleHtml = cached;
             this.dictResult = null;
           }
-          
+
           // 从网络获取最新内容，更新缓存
           fetch(url).then(r=>r.text()).then(html=>{
+            // 【改动】翻译版：剥离源文件自带的 <style> 块，避免它用 12pt 小字号覆盖父页面样式
+            if (this.mode === "translated") {
+              html = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+              html = html.replace(/<\/?(html|head|body|meta|title)[^>]*>/gi, '');
+            }
             // 原文页：把难词替换成可点击的蓝色超链接
             if (this.mode === "clean" && this.vocabList && this.vocabList.length > 0) {
               // 一次性替换所有单词，避免重复替换
@@ -1271,19 +1293,13 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          const suffix = this.mode === 'clean' ? 'clean' : 'annotated';
+          // 【改动】支持 translated 后缀
+          const suffix = this.mode === 'clean' ? 'clean' : (this.mode === 'translated' ? 'translated' : 'annotated');
           a.download = this.currentArticle.fileKey + '.' + suffix + '.html';
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
-        },
-        // 新增：打开翻译版（新标签页）
-        openTranslated(){
-          if (!this.currentArticle) return
-          // 把 cleanPath 的 .clean.html 替换为 .translated.html
-          const translatedUrl = this.currentArticle.cleanPath.replace('.clean.html', '.translated.html')
-          window.open(translatedUrl, '_blank')
         },
         toggleSpeak(){
           if (this.speaking) {
@@ -1305,6 +1321,8 @@
           this.speaking = true;
         },
         handleWordClick(e){
+          // 【改动】翻译视图下点击中文不触发查词
+          if (this.mode === 'translated') return;
           const word = e.target.getAttribute('data-word');
           if (!word) return;
           const v = this.vocabList.find(v => v.word.toLowerCase() === word.toLowerCase());
